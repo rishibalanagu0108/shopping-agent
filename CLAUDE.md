@@ -7,7 +7,7 @@ AI shopping agent (Amazon Rufus-style). Learning project — user is backend dev
 - Pkg mgr: `uv` (backend), `npm` (frontend). Never `pip install`.
 - Backend: Python, FastAPI, uvicorn
 - Agent: LangGraph + LangChain (`langgraph`, `langchain`, `langchain-community`)
-- LLM: Kimi (Moonshot) via `ChatOpenAI(base_url="https://api.moonshot.cn/v1", model="moonshot-v1-8k")`, key in `.env` as `MOONSHOT_API_KEY`
+- LLM: Kimi K2 via OpenRouter — `ChatOpenAI(base_url="https://openrouter.ai/api/v1", model="moonshotai/kimi-k2")`, key in `.env` as `OPENROUTER_API_KEY`
 - DB: SQLite only — `aiosqlite` + `sqlalchemy` async. Product search via SQLite **FTS5**, no vector DB.
 - Frontend: React + Vite + Tailwind
 - Streaming: SSE for agent chat

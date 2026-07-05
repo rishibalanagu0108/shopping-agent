@@ -5,7 +5,7 @@ Full spec as given by user. Source of truth for scope per milestone — check he
 ## M1 — Scaffold
 - `uv --version`, install if missing
 - `uv init backend`; `uv add fastapi uvicorn[standard] sqlalchemy aiosqlite python-dotenv langchain langchain-community langgraph openai`
-- `.env` + `.env.example` with `MOONSHOT_API_KEY=`
+- `.env` + `.env.example` with `OPENROUTER_API_KEY=`
 - `backend/app/main.py`: FastAPI app + `/health`
 - `npm create vite@latest frontend -- --template react` + Tailwind
 - Verify `uv run uvicorn app.main:app --reload` and `npm run dev` both start
