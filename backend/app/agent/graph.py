@@ -2,12 +2,13 @@ import os
 from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
+from app.agent.guardrails import check_input, extract_last_products, verify_output
 from app.agent.tools import get_order_history, get_recommendations, manage_cart, search_products
 
 load_dotenv()
@@ -34,8 +35,13 @@ llm_with_tools = llm.bind_tools(TOOLS)
 
 
 def input_guardrail(state: AgentState) -> dict:
-    # M5 fills this in with real rule-based checks (off-topic/injection detection).
-    # Stub keeps the graph topology correct now; M5 only changes this function's body.
+    result = check_input(state["messages"][-1].content)
+    if not result["allowed"]:
+        fallback = AIMessage(
+            content="I can't help with that — I'm a shopping assistant. "
+            "Try asking me about products, prices, or your cart."
+        )
+        return {"blocked": True, "messages": [fallback]}
     return {"blocked": False}
 
 
@@ -45,8 +51,16 @@ def agent(state: AgentState) -> dict:
 
 
 def output_guardrail(state: AgentState) -> dict:
-    # M5 fills this in with anti-hallucination checks against the DB.
-    return {}
+    last_products = extract_last_products(state["messages"])
+    last_message = state["messages"][-1]
+    result = verify_output(last_message.content, last_products)
+
+    update = {"last_products": last_products}
+    if not result["safe"]:
+        # Same id as the message being replaced — add_messages overwrites in place
+        # instead of appending, so the hallucinated response never reaches the user.
+        update["messages"] = [AIMessage(content=result["response"], id=last_message.id)]
+    return update
 
 
 def memory_update(state: AgentState) -> dict:
