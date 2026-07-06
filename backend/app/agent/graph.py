@@ -46,8 +46,8 @@ def input_guardrail(state: AgentState) -> dict:
     return {"blocked": False}
 
 
-def agent(state: AgentState) -> dict:
-    response = llm_with_tools.invoke(trim_messages(state["messages"]))
+async def agent(state: AgentState) -> dict:
+    response = await llm_with_tools.ainvoke(trim_messages(state["messages"]))
     return {"messages": [response]}
 
 
