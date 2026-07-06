@@ -40,7 +40,7 @@ MIN_LENGTH = 2
 # reaches YES/NO at all.
 _topic_classifier = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
-    model="nvidia/nemotron-3-super-120b-a12b:free",
+    model="moonshotai/kimi-k2.5",
     api_key=os.environ["OPENROUTER_API_KEY"],
     temperature=0,
     max_tokens=300,

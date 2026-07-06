@@ -29,7 +29,7 @@ class AgentState(TypedDict):
 
 llm = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
-    model="nvidia/nemotron-3-super-120b-a12b:free",
+    model="qwen/qwen3-235b-a22b-2507",
     api_key=os.environ["OPENROUTER_API_KEY"],
 )
 llm_with_tools = llm.bind_tools(TOOLS)

@@ -34,15 +34,21 @@ async def _stream_chat(user_id: int, message: str):
         "blocked": False,
     }
 
+    # Buffer the agent's text instead of forwarding on_chat_model_stream tokens live --
+    # streaming raw tokens would put them in front of the user before output_guardrail
+    # (which only runs after the "agent" node fully finishes) gets a chance to swap a
+    # hallucinated reply for the safe fallback. Wait for output_guardrail's on_chain_end
+    # and emit whatever it decided is the final text, corrected or not.
+    agent_reply = ""
     async for event in graph.astream_events(inputs, version="v2"):
         kind = event["event"]
-        # astream_events fires on_chat_model_stream for every chat-model call in the
-        # graph run, including input_guardrail's topic-classifier LLM -- scope to the
-        # "agent" node only, or the classifier's own tokens leak into the chat reply.
-        if kind == "on_chat_model_stream" and event["metadata"].get("langgraph_node") == "agent":
-            chunk = event["data"]["chunk"]
-            if chunk.content:
-                yield _sse("token", chunk.content)
+        if kind == "on_chain_end" and event["name"] == "agent":
+            msgs = event["data"]["output"].get("messages") or []
+            if msgs and msgs[0].content:
+                agent_reply = msgs[0].content
+        elif kind == "on_chain_end" and event["name"] == "output_guardrail":
+            corrected = event["data"]["output"].get("messages")
+            yield _sse("token", corrected[0].content if corrected else agent_reply)
         elif kind == "on_chain_end" and event["name"] == "input_guardrail" and event["data"]["output"].get("blocked"):
             # Blocked turns never reach the agent node, so no LLM ever streams the
             # fallback text -- it's a hardcoded AIMessage. Surface it manually here,
