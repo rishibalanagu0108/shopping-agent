@@ -2,8 +2,14 @@ import json
 import os
 import re
 
+from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
+
+# Must not rely on graph.py's load_dotenv() running first -- this module reads
+# OPENROUTER_API_KEY at import time too, and graph.py imports guardrails before
+# calling load_dotenv() itself, so the env var isn't loaded yet at that point.
+load_dotenv()
 
 # Rule-based and pre-LLM on purpose: rejecting junk here costs zero tokens and zero
 # latency, vs. paying for a full LLM call (and risking a jailbreak succeeding) just to
