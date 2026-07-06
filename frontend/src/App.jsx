@@ -1,121 +1,109 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect, useState } from "react"
+import { CheckCircle } from "@phosphor-icons/react"
+import Header from "./components/Header"
+import ProductGrid from "./components/ProductGrid"
+import CartSidebar from "./components/CartSidebar"
+import ChatWidget from "./components/ChatWidget"
+import { api } from "./lib/api"
+
+const EMPTY_CART = { items: [], total: 0 }
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [userId, setUserId] = useState(1)
+  const [categories, setCategories] = useState([])
+  const [activeCategory, setActiveCategory] = useState(null)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [products, setProducts] = useState([])
+  const [cart, setCart] = useState(EMPTY_CART)
+  const [cartOpen, setCartOpen] = useState(false)
+  const [checkingOut, setCheckingOut] = useState(false)
+  const [toast, setToast] = useState(null)
+
+  useEffect(() => {
+    api.listCategories().then(setCategories)
+  }, [])
+
+  useEffect(() => {
+    api.getCart(userId).then(setCart)
+  }, [userId])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      api.listProducts({ category: activeCategory, search: searchTerm }).then(setProducts)
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [activeCategory, searchTerm])
+
+  function showToast(message) {
+    setToast(message)
+    setTimeout(() => setToast(null), 2500)
+  }
+
+  function refreshCart() {
+    api.getCart(userId).then(setCart)
+  }
+
+  function handleAddToCart(productId) {
+    api.addToCart(userId, productId, 1).then(refreshCart)
+  }
+
+  function handleQtyChange(productId, currentQty, delta) {
+    const request = currentQty + delta <= 0 ? api.removeFromCart(userId, productId) : api.addToCart(userId, productId, delta)
+    request.then(refreshCart)
+  }
+
+  function handleCheckout() {
+    setCheckingOut(true)
+    api
+      .checkout(userId)
+      .then(() => {
+        refreshCart()
+        showToast("Order placed!")
+        setCartOpen(false)
+      })
+      .finally(() => setCheckingOut(false))
+  }
+
+  const cartCount = cart.items.reduce((sum, item) => sum + item.quantity, 0)
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="min-h-screen bg-zinc-50">
+      <Header
+        userId={userId}
+        onUserChange={setUserId}
+        cartCount={cartCount}
+        onCartClick={() => setCartOpen(true)}
+      />
 
-      <div className="ticks"></div>
+      <ProductGrid
+        products={products}
+        categories={categories}
+        activeCategory={activeCategory}
+        onCategoryChange={setActiveCategory}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        onAddToCart={handleAddToCart}
+      />
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+      <CartSidebar
+        open={cartOpen}
+        onClose={() => setCartOpen(false)}
+        cart={cart}
+        onQtyChange={handleQtyChange}
+        onRemove={(productId) => api.removeFromCart(userId, productId).then(refreshCart)}
+        onCheckout={handleCheckout}
+        checkingOut={checkingOut}
+      />
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      <ChatWidget key={userId} userId={userId} />
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
+          <CheckCircle size={18} weight="fill" className="text-emerald-400" />
+          {toast}
+        </div>
+      )}
+    </div>
   )
 }
 

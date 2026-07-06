@@ -36,12 +36,33 @@ async def _stream_chat(user_id: int, message: str):
 
     async for event in graph.astream_events(inputs, version="v2"):
         kind = event["event"]
-        if kind == "on_chat_model_stream":
+        # astream_events fires on_chat_model_stream for every chat-model call in the
+        # graph run, including input_guardrail's topic-classifier LLM -- scope to the
+        # "agent" node only, or the classifier's own tokens leak into the chat reply.
+        if kind == "on_chat_model_stream" and event["metadata"].get("langgraph_node") == "agent":
             chunk = event["data"]["chunk"]
             if chunk.content:
                 yield _sse("token", chunk.content)
+        elif kind == "on_chain_end" and event["name"] == "input_guardrail" and event["data"]["output"].get("blocked"):
+            # Blocked turns never reach the agent node, so no LLM ever streams the
+            # fallback text -- it's a hardcoded AIMessage. Surface it manually here,
+            # the one case where "token" data isn't literally an LLM token.
+            yield _sse("token", event["data"]["output"]["messages"][0].content)
         elif kind == "on_tool_start":
-            yield _sse("tool_call", event["name"])
+            yield _sse("tool_call", {"name": event["name"], "status": "start"})
+        elif kind == "on_tool_end":
+            # ToolMessage.content is usually the JSON string ToolNode serialized the tool's
+            # return value into, but some providers wrap it as a list of content blocks
+            # ([{"type": "text", "text": "..."}]) instead of a plain string -- normalize
+            # before parsing so the frontend gets real product objects for chips.
+            content = event["data"]["output"].content
+            if isinstance(content, list):
+                content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+            try:
+                result = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                result = None
+            yield _sse("tool_call", {"name": event["name"], "status": "end", "result": result})
 
     yield _sse("done", "")
 

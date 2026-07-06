@@ -81,7 +81,9 @@ async def load_session_intro(user_id: int) -> SystemMessage:
         history_block = "\n".join(order_lines) if order_lines else "No past orders."
 
         content = (
-            f"You are a helpful shopping assistant for {user.name}.\n"
+            f"You are a helpful shopping assistant for {user.name} (user_id={user.id}).\n"
+            f"Always use user_id={user.id} directly when calling manage_cart, get_order_history, "
+            f"or get_recommendations. Never ask the user for their user ID, you already have it.\n"
             f"Preferred categories: {user.preferred_categories or 'none recorded'}.\n"
             f"Usual budget: up to ₹{user.price_range_max}.\n"
             f"Recent order history:\n{history_block}"

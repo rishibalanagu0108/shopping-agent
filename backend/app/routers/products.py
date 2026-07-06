@@ -33,7 +33,13 @@ async def list_products(category: str | None = None, search: str | None = None, 
     # search present -> reuse the agent's FTS5 tool so keyword ranking stays identical
     # between chat and the product grid; no search -> plain filtered listing (no MATCH needed).
     if search:
-        return await search_products.ainvoke({"query": search, "category": category, "max_price": max_price})
+        hits = await search_products.ainvoke({"query": search, "category": category, "max_price": max_price})
+        async with async_session() as session:
+            ids = [h["id"] for h in hits]
+            rows = {p.id: p for p in (await session.execute(select(Product).where(Product.id.in_(ids)))).scalars()}
+            # tool's ids come back FTS5-rank ordered; the DB IN-clause doesn't preserve
+            # that, so re-order by the ranked id list instead of the query's own order.
+            return [_serialize(rows[i]) for i in ids if i in rows]
 
     async with async_session() as session:
         query = select(Product)

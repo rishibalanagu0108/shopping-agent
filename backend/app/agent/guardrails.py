@@ -1,7 +1,9 @@
 import json
+import os
 import re
 
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_openai import ChatOpenAI
 
 # Rule-based and pre-LLM on purpose: rejecting junk here costs zero tokens and zero
 # latency, vs. paying for a full LLM call (and risking a jailbreak succeeding) just to
@@ -22,29 +24,42 @@ INJECTION_PATTERNS = [
     "jailbreak",
 ]
 
-# Ponytail: denylist, not a topic classifier — catches obviously unrelated queries,
-# not every off-topic phrasing. Upgrade path: LLM-based intent check if false
-# negatives (off-topic questions slipping through) become a real problem.
-OFF_TOPIC_PATTERNS = [
-    "weather",
-    "capital of",
-    "who is the president",
-    "write a poem",
-    "write code",
-    "solve this equation",
-    "translate this",
-    "meaning of life",
-    "current news",
-    "stock market",
-    "cricket score",
-    "football match",
-]
-
 MIN_LENGTH = 2
 
+# Off-topic detection needs semantic judgement (a denylist can't enumerate every
+# off-topic phrasing), so this is the one guardrail check that costs an LLM call.
+# Kept cheap: separate no-tools client, temperature=0. max_tokens=300, not 5 -- this
+# model is a reasoning variant that emits chain-of-thought before its final word, so a
+# tight token cap cuts it off mid-thought (e.g. "We need to decide if") and it never
+# reaches YES/NO at all.
+_topic_classifier = ChatOpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    model="nvidia/nemotron-3-super-120b-a12b:free",
+    api_key=os.environ["OPENROUTER_API_KEY"],
+    temperature=0,
+    max_tokens=300,
+)
 
-def check_input(text: str) -> dict:
-    """Rule-based pre-LLM check: reject off-topic/too-short/gibberish/injection attempts."""
+TOPIC_CLASSIFIER_PROMPT = (
+    "You are a strict binary topic classifier guarding a shopping assistant chatbot. "
+    "The assistant only handles: searching products, prices, cart, checkout, orders, "
+    "and recommendations. Reply with exactly one word, YES or NO. YES if the message "
+    "below is on-topic for this shopping assistant. NO for anything else (coding help, "
+    "general knowledge, math, translation, news, weather, small talk unrelated to "
+    "shopping, etc.)."
+)
+
+
+async def _is_on_topic(text: str) -> bool:
+    response = await _topic_classifier.ainvoke(
+        [SystemMessage(content=TOPIC_CLASSIFIER_PROMPT), HumanMessage(content=text)]
+    )
+    return response.content.strip().upper().startswith("YES")
+
+
+async def check_input(text: str) -> dict:
+    """Reject too-short/gibberish/injection attempts via zero-cost rules first, then
+    off-topic via LLM classifier (see _is_on_topic) only if those cheap checks pass."""
     stripped = text.strip()
     if len(stripped) < MIN_LENGTH:
         return {"allowed": False, "reason": "too_short"}
@@ -63,9 +78,8 @@ def check_input(text: str) -> dict:
     if words and not any(any(v in w for v in "aeiou") for w in words):
         return {"allowed": False, "reason": "gibberish"}
 
-    for pattern in OFF_TOPIC_PATTERNS:
-        if pattern in lower:
-            return {"allowed": False, "reason": "off_topic"}
+    if not await _is_on_topic(stripped):
+        return {"allowed": False, "reason": "off_topic"}
 
     return {"allowed": True, "reason": None}
 

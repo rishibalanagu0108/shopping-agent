@@ -35,8 +35,8 @@ llm = ChatOpenAI(
 llm_with_tools = llm.bind_tools(TOOLS)
 
 
-def input_guardrail(state: AgentState) -> dict:
-    result = check_input(state["messages"][-1].content)
+async def input_guardrail(state: AgentState) -> dict:
+    result = await check_input(state["messages"][-1].content)
     if not result["allowed"]:
         fallback = AIMessage(
             content="I can't help with that — I'm a shopping assistant. "
