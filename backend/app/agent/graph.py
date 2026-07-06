@@ -2,13 +2,14 @@ import os
 from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.agent.guardrails import check_input, extract_last_products, verify_output
+from app.agent.memory import load_session_intro, trim_messages, update_long_term_memory
 from app.agent.tools import get_order_history, get_recommendations, manage_cart, search_products
 
 load_dotenv()
@@ -46,7 +47,7 @@ def input_guardrail(state: AgentState) -> dict:
 
 
 def agent(state: AgentState) -> dict:
-    response = llm_with_tools.invoke(state["messages"])
+    response = llm_with_tools.invoke(trim_messages(state["messages"]))
     return {"messages": [response]}
 
 
@@ -63,8 +64,10 @@ def output_guardrail(state: AgentState) -> dict:
     return update
 
 
-def memory_update(state: AgentState) -> dict:
-    # M6 fills this in with long-term writeback (price prefs, category browsing, checkout).
+async def memory_update(state: AgentState) -> dict:
+    last_human = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
+    if last_human:
+        await update_long_term_memory(state["user_id"], last_human.content, state["last_products"])
     return {}
 
 
@@ -100,12 +103,11 @@ graph = graph_builder.compile()
 if __name__ == "__main__":
     import asyncio
 
-    from langchain_core.messages import HumanMessage
-
     async def run():
+        intro = await load_session_intro(1)
         result = await graph.ainvoke(
             {
-                "messages": [HumanMessage(content="Find me a bluetooth speaker under 1000 rupees")],
+                "messages": [intro, HumanMessage(content="Find me a bluetooth speaker under 1000 rupees")],
                 "user_id": 1,
                 "cart_snapshot": [],
                 "last_products": [],
