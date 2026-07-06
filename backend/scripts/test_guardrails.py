@@ -22,6 +22,7 @@ OUTPUT_CASES = [
     ("The Portable Bluetooth Speaker is ₹863.84.", True),
     ("The Portable Bluetooth Speaker is ₹900.", True),  # within 10%
     ("The Portable Bluetooth Speaker is ₹99.", False),  # hallucinated price
+    ("The Redmi 9A is ₹1499.", False),  # invented product, no match in last_products at all
 ]
 
 

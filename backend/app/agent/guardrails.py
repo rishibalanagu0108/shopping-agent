@@ -123,19 +123,24 @@ def verify_output(response: str, last_products: list[dict]) -> dict:
     DB-backed tool call this turn — and checks quoted prices land within 10% of the
     real price. Post-LLM because the model has already generated the text by this
     point; we can only verify and swap in a safe fallback, not prevent generation.
-    Ponytail: only catches mismatches against *this turn's* tool results, not every
-    conceivable hallucination (an invented product with no price mentioned at all
-    slips through) — upgrade path is a stricter parse or NER pass if that matters.
+
+    A response that quotes a price but names no product from last_products (or
+    last_products is empty because the tool found nothing/nothing relevant) is the
+    exact shape of an invented listing — flagged unsafe even without a name match,
+    since a real grounded answer would only ever quote prices from this turn's tool
+    result. Ponytail: still can't catch a hallucinated product name with zero price
+    quoted at all — upgrade path is a stricter parse or NER pass if that matters.
     """
+    quoted_prices = [float(m.replace(",", "")) for m in PRICE_PATTERN.findall(response)]
+
     if not last_products:
-        return {"safe": True, "response": response}
+        return {"safe": not quoted_prices, "response": response if not quoted_prices else FALLBACK_RESPONSE}
 
     lower = response.lower()
     mentioned = [p for p in last_products if p["name"].lower() in lower]
     if not mentioned:
-        return {"safe": True, "response": response}
+        return {"safe": not quoted_prices, "response": response if not quoted_prices else FALLBACK_RESPONSE}
 
-    quoted_prices = [float(m.replace(",", "")) for m in PRICE_PATTERN.findall(response)]
     for product in mentioned:
         if quoted_prices and not any(abs(q - product["price"]) / product["price"] <= 0.10 for q in quoted_prices):
             return {"safe": False, "response": FALLBACK_RESPONSE}
