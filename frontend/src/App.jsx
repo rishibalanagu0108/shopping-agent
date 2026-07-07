@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react"
+import { Routes, Route } from "react-router-dom"
 import { CheckCircle } from "@phosphor-icons/react"
 import Header from "./components/Header"
 import ProductGrid from "./components/ProductGrid"
 import CartSidebar from "./components/CartSidebar"
 import ChatWidget from "./components/ChatWidget"
+import OrdersPage from "./pages/OrdersPage"
 import { api } from "./lib/api"
 
 const EMPTY_CART = { items: [], total: 0 }
@@ -75,15 +77,23 @@ function App() {
         onCartClick={() => setCartOpen(true)}
       />
 
-      <ProductGrid
-        products={products}
-        categories={categories}
-        activeCategory={activeCategory}
-        onCategoryChange={setActiveCategory}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        onAddToCart={handleAddToCart}
-      />
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <ProductGrid
+              products={products}
+              categories={categories}
+              activeCategory={activeCategory}
+              onCategoryChange={setActiveCategory}
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              onAddToCart={handleAddToCart}
+            />
+          }
+        />
+        <Route path="/orders" element={<OrdersPage userId={userId} />} />
+      </Routes>
 
       <CartSidebar
         open={cartOpen}

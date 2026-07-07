@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import init_db
-from app.routers import agent, cart, products
+from app.routers import agent, cart, orders, products
 
 app = FastAPI(title="Shopping Agent")
 
@@ -15,6 +15,7 @@ app.add_middleware(
 
 app.include_router(products.router)
 app.include_router(cart.router)
+app.include_router(orders.router)
 app.include_router(agent.router)
 
 

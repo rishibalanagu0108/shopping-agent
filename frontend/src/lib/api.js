@@ -24,6 +24,7 @@ export const api = {
   removeFromCart: (userId, productId) =>
     request(`/api/cart/${userId}/remove/${productId}`, { method: "DELETE" }),
   checkout: (userId) => request(`/api/cart/${userId}/checkout`, { method: "POST" }),
+  getOrders: (userId) => request(`/api/orders/${userId}`),
 }
 
 export const CHAT_URL = `${BASE_URL}/api/agent/chat`

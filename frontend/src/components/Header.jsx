@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { CaretDown, Storefront, ShoppingCartSimple } from "@phosphor-icons/react"
+import { Link } from "react-router-dom"
+import { CaretDown, Storefront, ShoppingCartSimple, Receipt } from "@phosphor-icons/react"
 
 export const USERS = [
   { id: 1, name: "Shyam" },
@@ -24,11 +25,20 @@ export default function Header({ userId, onUserChange, cartCount, onCartClick })
     <header className="sticky top-0 z-30 h-16 border-b border-zinc-200 bg-white">
       <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-6">
         <div className="flex items-center gap-2">
-          <Storefront size={24} weight="fill" className="text-indigo-600" />
-          <span className="text-lg font-bold text-zinc-900">Dukaan</span>
+          <Link to="/" className="flex items-center gap-2">
+            <Storefront size={24} weight="fill" className="text-indigo-600" />
+            <span className="text-lg font-bold text-zinc-900">Dukaan</span>
+          </Link>
         </div>
 
         <div className="flex items-center gap-4">
+          <Link
+            to="/orders"
+            className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-zinc-100"
+            aria-label="View orders"
+          >
+            <Receipt size={22} className="text-zinc-700" />
+          </Link>
           <div ref={menuRef} className="relative">
             <button
               type="button"
