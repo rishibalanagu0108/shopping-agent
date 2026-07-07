@@ -95,7 +95,7 @@ function App() {
         checkingOut={checkingOut}
       />
 
-      <ChatWidget key={userId} userId={userId} />
+      <ChatWidget key={userId} userId={userId} onCartChange={refreshCart} />
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-full bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">

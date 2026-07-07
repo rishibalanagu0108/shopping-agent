@@ -2,13 +2,21 @@ import json
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import BaseModel
 
 from app.agent.graph import graph
-from app.agent.memory import load_session_intro
+from app.agent.memory import load_session_intro, trim_messages
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
+
+# Per-user_id short-term conversation history. In-memory and lost on restart on purpose --
+# durable cross-session facts already go through update_long_term_memory into SQLite;
+# this is just the sliding window trim_messages was built for, finally given something to
+# trim. Each POST used to start a graph run from scratch (intro + only the new message),
+# so multi-turn coreference ("add the one you just mentioned") had nothing to resolve
+# against -- this dict is what carries prior turns across separate HTTP requests.
+_sessions: dict[int, list[BaseMessage]] = {}
 
 
 class ChatRequest(BaseModel):
@@ -25,9 +33,13 @@ def _sse(event_type: str, data) -> str:
 # + reuse of the same fetch stack as the REST endpoints beats a WebSocket's separate
 # connection lifecycle and protocol upgrade for what's ultimately a glorified long-poll.
 async def _stream_chat(user_id: int, message: str):
-    intro = await load_session_intro(user_id)
+    history = _sessions.get(user_id)
+    if history is None:
+        history = [await load_session_intro(user_id)]
+
+    human_message = HumanMessage(content=message)
     inputs = {
-        "messages": [intro, HumanMessage(content=message)],
+        "messages": history + [human_message],
         "user_id": user_id,
         "cart_snapshot": [],
         "last_products": [],
@@ -40,6 +52,7 @@ async def _stream_chat(user_id: int, message: str):
     # hallucinated reply for the safe fallback. Wait for output_guardrail's on_chain_end
     # and emit whatever it decided is the final text, corrected or not.
     agent_reply = ""
+    final_reply = None
     async for event in graph.astream_events(inputs, version="v2"):
         kind = event["event"]
         if kind == "on_chain_end" and event["name"] == "agent":
@@ -48,12 +61,14 @@ async def _stream_chat(user_id: int, message: str):
                 agent_reply = msgs[0].content
         elif kind == "on_chain_end" and event["name"] == "output_guardrail":
             corrected = event["data"]["output"].get("messages")
-            yield _sse("token", corrected[0].content if corrected else agent_reply)
+            final_reply = corrected[0].content if corrected else agent_reply
+            yield _sse("token", final_reply)
         elif kind == "on_chain_end" and event["name"] == "input_guardrail" and event["data"]["output"].get("blocked"):
             # Blocked turns never reach the agent node, so no LLM ever streams the
             # fallback text -- it's a hardcoded AIMessage. Surface it manually here,
             # the one case where "token" data isn't literally an LLM token.
-            yield _sse("token", event["data"]["output"]["messages"][0].content)
+            final_reply = event["data"]["output"]["messages"][0].content
+            yield _sse("token", final_reply)
         elif kind == "on_tool_start":
             yield _sse("tool_call", {"name": event["name"], "status": "start"})
         elif kind == "on_tool_end":
@@ -69,6 +84,11 @@ async def _stream_chat(user_id: int, message: str):
             except (json.JSONDecodeError, TypeError):
                 result = None
             yield _sse("tool_call", {"name": event["name"], "status": "end", "result": result})
+
+    history.append(human_message)
+    if final_reply is not None:
+        history.append(AIMessage(content=final_reply))
+    _sessions[user_id] = trim_messages(history)
 
     yield _sse("done", "")
 

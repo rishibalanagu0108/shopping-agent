@@ -12,25 +12,53 @@ async def search_products(query: str, category: str | None = None, max_price: fl
     # tokens on the same row. OR-joining the tokens instead means ANY word hit counts,
     # which is what makes a rambly query like "something cozy for winter" still surface
     # products whose text only contains "winter" — the tradeoff for not having embeddings.
+    #
+    # products_fts only indexes name/description/brand (see database.py), not category --
+    # so a plain category browse ("find me books") legitimately matches nothing there,
+    # whether or not the model bothered to pass the separate `category` arg for it. Detect
+    # a query token that names a real category (DB-driven, not hardcoded) and treat that as
+    # the effective category filter instead of AND-ing a MATCH clause that would zero out
+    # every row a category filter alone would've found.
     tokens = [w for w in query.split() if w.isalnum()]
-    if not tokens:
-        return []
-    match_query = " OR ".join(tokens)
 
-    sql = """
-        SELECT p.id, p.name, p.price, p.category, p.rating, p.stock
-        FROM products_fts
-        JOIN products p ON p.id = products_fts.rowid
-        WHERE products_fts MATCH :match_query
-    """
-    params = {"match_query": match_query}
-    if category:
-        sql += " AND p.category = :category"
-        params["category"] = category
+    async with async_session() as session:
+        categories = {row[0].lower(): row[0] for row in (await session.execute(text("SELECT DISTINCT category FROM products"))).all()}
+
+    # SQLite string comparison is case-sensitive -- canonicalize through the same
+    # lowercase-keyed dict even when the model passes `category` explicitly, or a
+    # perfectly correct "books" (vs. the DB's "Books") silently zeroes the whole query.
+    effective_category = (
+        (categories.get(category.lower()) if category else None)
+        or next((categories[t.lower()] for t in tokens if t.lower() in categories), None)
+    )
+    if effective_category:
+        category_words = {w.lower() for w in effective_category.split()}
+        tokens = [t for t in tokens if t.lower() not in category_words]
+
+    if not tokens and effective_category is None:
+        return []
+
+    params = {}
+    if tokens:
+        match_query = " OR ".join(tokens)
+        sql = """
+            SELECT p.id, p.name, p.price, p.category, p.rating, p.stock
+            FROM products_fts
+            JOIN products p ON p.id = products_fts.rowid
+            WHERE products_fts MATCH :match_query
+        """
+        params["match_query"] = match_query
+    else:
+        sql = "SELECT id, name, price, category, rating, stock FROM products WHERE 1=1"
+
+    prefix = "p." if tokens else ""
+    if effective_category:
+        sql += f" AND {prefix}category = :category"
+        params["category"] = effective_category
     if max_price is not None:
-        sql += " AND p.price <= :max_price"
+        sql += f" AND {prefix}price <= :max_price"
         params["max_price"] = max_price
-    sql += " ORDER BY rank LIMIT 10"
+    sql += " ORDER BY rank LIMIT 10" if tokens else " ORDER BY rating DESC LIMIT 10"
 
     async with async_session() as session:
         result = await session.execute(text(sql), params)
@@ -42,6 +70,14 @@ async def manage_cart(action: str, user_id: int, product_id: int | None = None, 
     """Manage a user's cart. action is one of: add, remove, view, clear, checkout."""
     async with async_session() as session:
         if action == "add":
+            # product_id comes straight from the LLM's tool call, not from a value it
+            # copy-pasted out of a prior search_products result -- validate it's real
+            # before inserting, or a hallucinated ID silently succeeds here and only
+            # surfaces later as a misleadingly generic "empty_cart" at checkout (the
+            # orphan row gets dropped by checkout's JOIN to Product).
+            if await session.get(Product, product_id) is None:
+                return {"status": "product_not_found", "product_id": product_id}
+
             existing = await session.scalar(
                 select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
             )

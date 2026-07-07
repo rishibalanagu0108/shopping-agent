@@ -26,7 +26,7 @@ async function* readSSE(response) {
   }
 }
 
-export default function ChatWidget({ userId }) {
+export default function ChatWidget({ userId, onCartChange }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState("")
@@ -70,6 +70,12 @@ export default function ChatWidget({ userId }) {
               next[next.length - 1] = { ...last, products: [...last.products, ...event.data.result] }
               return next
             })
+          }
+          // manage_cart writes straight to the DB from the tool node -- App's cart
+          // state has no other signal that it happened, so it'd otherwise only catch
+          // up on next mount/page refresh.
+          if (event.data.name === "manage_cart") {
+            onCartChange?.()
           }
         }
       } else if (event.type === "done") {
