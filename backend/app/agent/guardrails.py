@@ -112,10 +112,34 @@ def extract_last_products(messages: list) -> list[dict]:
                 continue
             if isinstance(data, list):
                 products.extend(p for p in data if isinstance(p, dict) and "name" in p and "price" in p)
+            # manage_cart's "added" result is a single dict, not a list -- it's still a
+            # DB-grounded name+price (see tools.py) worth cross-checking the confirmation
+            # text against, same as a search_products row.
+            elif isinstance(data, dict) and "name" in data and "price" in data:
+                products.append(data)
     return products
 
 
-def verify_output(response: str, last_products: list[dict]) -> dict:
+def extract_last_totals(messages: list) -> list[float]:
+    """manage_cart's view/checkout actions return a dict with a "total" key, not a
+    product list -- extract_last_products can't see those. A checkout confirmation
+    quoting the real order total would otherwise look identical to a hallucinated
+    price with nothing to cross-check against."""
+    totals = []
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            break
+        if isinstance(msg, ToolMessage):
+            try:
+                data = json.loads(msg.content)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(data, dict) and isinstance(data.get("total"), (int, float)):
+                totals.append(data["total"])
+    return totals
+
+
+def verify_output(response: str, last_products: list[dict], last_totals: list[float] | None = None) -> dict:
     """
     Anti-hallucination check (the Rufus-style failure this guards against: an LLM
     confidently quoting a product or price it invented). Cross-references any product
@@ -128,18 +152,24 @@ def verify_output(response: str, last_products: list[dict]) -> dict:
     last_products is empty because the tool found nothing/nothing relevant) is the
     exact shape of an invented listing — flagged unsafe even without a name match,
     since a real grounded answer would only ever quote prices from this turn's tool
-    result. Ponytail: still can't catch a hallucinated product name with zero price
-    quoted at all — upgrade path is a stricter parse or NER pass if that matters.
+    result. last_totals covers the one legitimate exception: a cart/checkout total,
+    which is a real price with no product name to match against. Ponytail: still
+    can't catch a hallucinated product name with zero price quoted at all — upgrade
+    path is a stricter parse or NER pass if that matters.
     """
     quoted_prices = [float(m.replace(",", "")) for m in PRICE_PATTERN.findall(response)]
+    last_totals = last_totals or []
+    total_grounded = any(abs(q - t) / t <= 0.10 for q in quoted_prices for t in last_totals if t)
 
     if not last_products:
-        return {"safe": not quoted_prices, "response": response if not quoted_prices else FALLBACK_RESPONSE}
+        safe = not quoted_prices or total_grounded
+        return {"safe": safe, "response": response if safe else FALLBACK_RESPONSE}
 
     lower = response.lower()
     mentioned = [p for p in last_products if p["name"].lower() in lower]
     if not mentioned:
-        return {"safe": not quoted_prices, "response": response if not quoted_prices else FALLBACK_RESPONSE}
+        safe = not quoted_prices or total_grounded
+        return {"safe": safe, "response": response if safe else FALLBACK_RESPONSE}
 
     for product in mentioned:
         if quoted_prices and not any(abs(q - product["price"]) / product["price"] <= 0.10 for q in quoted_prices):

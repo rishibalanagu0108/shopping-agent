@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from app.agent.guardrails import check_input, extract_last_products, verify_output
+from app.agent.guardrails import check_input, extract_last_products, extract_last_totals, verify_output
 from app.agent.memory import load_session_intro, trim_messages, update_long_term_memory
 from app.agent.tools import get_order_history, get_recommendations, manage_cart, search_products
 
@@ -54,7 +54,8 @@ async def agent(state: AgentState) -> dict:
 def output_guardrail(state: AgentState) -> dict:
     last_products = extract_last_products(state["messages"])
     last_message = state["messages"][-1]
-    result = verify_output(last_message.content, last_products)
+    last_totals = extract_last_totals(state["messages"])
+    result = verify_output(last_message.content, last_products, last_totals)
 
     update = {"last_products": last_products}
     if not result["safe"]:

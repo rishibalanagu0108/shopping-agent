@@ -66,18 +66,39 @@ async def search_products(query: str, category: str | None = None, max_price: fl
 
 
 @tool
-async def manage_cart(action: str, user_id: int, product_id: int | None = None, quantity: int = 1) -> dict:
-    """Manage a user's cart. action is one of: add, remove, view, clear, checkout."""
+async def manage_cart(
+    action: str,
+    user_id: int,
+    product_id: int | None = None,
+    product_name: str | None = None,
+    quantity: int = 1,
+) -> dict:
+    """Manage a user's cart. action is one of: add, remove, view, clear, checkout.
+    For add/remove, prefer product_name (the name as the user said it, or as it appeared
+    in a recent search_products result) over product_id -- a name is resolved fresh
+    against the catalog every time, whereas a numeric id has to be carried correctly
+    across turns and a misremembered one silently lands on the wrong real product."""
     async with async_session() as session:
-        if action == "add":
-            # product_id comes straight from the LLM's tool call, not from a value it
-            # copy-pasted out of a prior search_products result -- validate it's real
-            # before inserting, or a hallucinated ID silently succeeds here and only
-            # surfaces later as a misleadingly generic "empty_cart" at checkout (the
-            # orphan row gets dropped by checkout's JOIN to Product).
-            if await session.get(Product, product_id) is None:
+        if action in ("add", "remove"):
+            # A recalled numeric id is the fragile path -- prefer resolving fresh by
+            # name. Exact match first, then substring, so "Mystery at Midnight" still
+            # resolves to "Mystery at Midnight (Novel)".
+            if product_name:
+                product = await session.scalar(select(Product).where(Product.name == product_name))
+                if product is None:
+                    product = await session.scalar(select(Product).where(Product.name.ilike(f"%{product_name}%")))
+                if product is None:
+                    return {"status": "product_not_found", "product_name": product_name}
+                product_id = product.id
+            elif await session.get(Product, product_id) is None:
+                # product_id came with no name to resolve against -- still validate it's
+                # real, or a hallucinated id silently succeeds and only surfaces later as
+                # a misleadingly generic "empty_cart" at checkout (the orphan row gets
+                # dropped by checkout's JOIN to Product).
                 return {"status": "product_not_found", "product_id": product_id}
 
+        if action == "add":
+            product = await session.get(Product, product_id)
             existing = await session.scalar(
                 select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
             )
@@ -86,7 +107,7 @@ async def manage_cart(action: str, user_id: int, product_id: int | None = None, 
             else:
                 session.add(Cart(user_id=user_id, product_id=product_id, quantity=quantity))
             await session.commit()
-            return {"status": "added", "product_id": product_id, "quantity": quantity}
+            return {"status": "added", "product_id": product_id, "name": product.name, "price": product.price, "quantity": quantity}
 
         if action == "remove":
             await session.execute(delete(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id))
