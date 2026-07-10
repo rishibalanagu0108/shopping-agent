@@ -9,6 +9,9 @@ app = FastAPI(title="Shopping Agent")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
+    # Vercel deploys (prod + preview URLs) served over HTTPS; regex avoids
+    # hardcoding a single deploy URL that changes per preview.
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_methods=["*"],
     allow_headers=["*"],
 )
